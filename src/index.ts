@@ -200,7 +200,7 @@ export default function first(
         // Callback-style abort is best-effort cleanup.
       }
 
-      const cancelled = (() => {}) as FirstWaiter
+      const cancelled = ((_: FirstCallback) => {}) as FirstWaiter
       cancelled.cancel = () => {}
       return cancelled
     }
