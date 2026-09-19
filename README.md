@@ -10,4 +10,4 @@ The public callback shape is compatible with the established `ee-first` API, whi
 
 ## Status
 
-Version **0.1.0** until the first public release.
+**0.1.0 — public release.** The package is production-ready for its intended first-event coordination use case.
