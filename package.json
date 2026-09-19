@@ -1,0 +1,31 @@
+{
+  "name": "ee-first-modern",
+  "version": "0.1.0",
+  "description": "A modern, dependency-free, typed first-event primitive compatible with the ee-first callback API, with Promise and AbortSignal support.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp cjs/index.cjs dist/index.cjs",
+    "test": "npm run build && node --test test/*.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run typecheck && npm test",
+    "bench": "npm run build && node bench.mjs",
+    "pack:check": "npm run check && npm pack --dry-run"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
