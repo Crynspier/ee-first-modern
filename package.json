@@ -26,7 +26,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "npm run build && node --test test/*.mjs",
+    "test": "npm run build && node --test test",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "check": "npm run typecheck && npm test",
     "bench": "npm run build && node bench.mjs",
