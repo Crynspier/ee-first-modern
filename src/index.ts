@@ -50,15 +50,28 @@ type CleanupEntry = {
   listener: (...args: unknown[]) => void
 }
 
-type CleanupError = unknown | undefined
+interface Failure {
+  failed: boolean
+  error: unknown
+}
+
+const noFailure = (): Failure => ({
+  failed: false,
+  error: undefined,
+})
+
+const failure = (error: unknown): Failure => ({
+  failed: true,
+  error,
+})
 
 interface Registration {
-  cancel(): CleanupError
+  cancel(): Failure
 }
 
 interface Completion {
   result: FirstResult
-  cleanupError: CleanupError
+  cleanup: Failure
 }
 
 function validateSpecs(stuff: readonly EventSpec[]): void {
@@ -103,10 +116,11 @@ function removeListener(
 
 /**
  * Attempts every removal. Entries whose remover throws remain registered so a
- * later cancel() can retry cleanup. The first failure is returned.
+ * later cancel() can retry cleanup. Throwing undefined is treated as a real
+ * failure rather than as "no error".
  */
-function cleanupEntries(entries: CleanupEntry[]): CleanupError {
-  let firstError: unknown | undefined
+function cleanupEntries(entries: CleanupEntry[]): Failure {
+  let firstFailure: Failure = noFailure()
   const remaining: CleanupEntry[] = []
 
   for (const entry of entries) {
@@ -114,18 +128,23 @@ function cleanupEntries(entries: CleanupEntry[]): CleanupError {
       removeListener(entry.emitter, entry.event, entry.listener)
     } catch (error) {
       remaining.push(entry)
-      if (firstError === undefined) firstError = error
+      if (!firstFailure.failed) firstFailure = failure(error)
     }
   }
 
   entries.splice(0, entries.length, ...remaining)
-  return firstError
+  return firstFailure
 }
 
-function combineErrors(primary: unknown, secondary: unknown, message: string): unknown {
-  if (secondary === undefined) return primary
-  if (primary === undefined) return secondary
-  return new AggregateError([primary, secondary], message)
+function combineFailures(
+  primary: Failure,
+  secondary: Failure,
+  message: string,
+): Failure {
+  if (!secondary.failed) return primary
+  if (!primary.failed) return secondary
+
+  return failure(new AggregateError([primary.error, secondary.error], message))
 }
 
 function abortError(signal?: AbortSignal): FirstAbortedError {
@@ -154,7 +173,7 @@ function setupFirst(
   stuff: readonly EventSpec[],
   signal: AbortSignal | undefined,
   onEvent: (completion: Completion) => void,
-  onAbort: (cleanupError: CleanupError) => void,
+  onAbort: (cleanup: Failure) => void,
 ): Registration {
   validateSpecs(stuff)
 
@@ -162,9 +181,9 @@ function setupFirst(
   let settled = false
   let abortHandler: (() => void) | undefined
 
-  const cleanup = (): CleanupError => {
-    const cleanupError = cleanupEntries(cleanups)
-    let abortCleanupError: CleanupError
+  const cleanup = (): Failure => {
+    const listenerCleanup = cleanupEntries(cleanups)
+    let abortCleanup = noFailure()
 
     if (abortHandler && signal) {
       try {
@@ -172,19 +191,19 @@ function setupFirst(
         abortHandler = undefined
       } catch (error) {
         // Keep the handler reference so a later cancel() can retry removal.
-        abortCleanupError = error
+        abortCleanup = failure(error)
       }
     }
 
-    return combineErrors(
-      cleanupError,
-      abortCleanupError,
+    return combineFailures(
+      listenerCleanup,
+      abortCleanup,
       'Event listener and AbortSignal cleanup both failed',
     )
   }
 
   const complete = (
-    error: unknown | null,
+    error: unknown | null | undefined,
     emitter: EventEmitterLike,
     event: EventName,
     args: unknown[],
@@ -192,11 +211,11 @@ function setupFirst(
     if (settled) return
 
     settled = true
-    const cleanupError = cleanup()
+    const cleanupResult = cleanup()
 
     onEvent({
       result: { error, emitter, event, args },
-      cleanupError,
+      cleanup: cleanupResult,
     })
   }
 
@@ -217,7 +236,7 @@ function setupFirst(
   if (signal?.aborted) {
     settled = true
     return {
-      cancel: () => undefined,
+      cancel: () => noFailure(),
     }
   }
 
@@ -226,8 +245,8 @@ function setupFirst(
       if (settled) return
 
       settled = true
-      const cleanupError = cleanup()
-      onAbort(cleanupError)
+      const cleanupResult = cleanup()
+      onAbort(cleanupResult)
     }
 
     signal.addEventListener('abort', abortHandler, { once: true })
@@ -242,15 +261,19 @@ function setupFirst(
       }
     }
   } catch (error) {
-    const cleanupError = cleanup()
-    throw combineErrors(error, cleanupError, 'Event listener registration and cleanup both failed')
+    const cleanupResult = cleanup()
+    throw combineFailures(
+      failure(error),
+      cleanupResult,
+      'Event listener registration and cleanup both failed',
+    ).error
   }
 
   return {
-    cancel: (): CleanupError => {
+    cancel: (): Failure => {
       // If an earlier cleanup failed, allow a later cancel() to retry the
       // remaining removals even though the waiter has logically settled.
-      if (cleanups.length === 0 && !abortHandler && settled) return undefined
+      if (cleanups.length === 0 && !abortHandler && settled) return noFailure()
 
       settled = true
       return cleanup()
@@ -278,22 +301,22 @@ export default function first(
   registration = setupFirst(
     stuff,
     options.signal,
-    ({ result, cleanupError }) => {
-      let callbackError: unknown | undefined
+    ({ result, cleanup }) => {
+      let callbackFailure = noFailure()
 
       try {
         callback(result.error, result.emitter, result.event, result.args)
       } catch (error) {
-        callbackError = error
+        callbackFailure = failure(error)
       }
 
-      const error = combineErrors(
-        callbackError,
-        cleanupError,
+      const combined = combineFailures(
+        callbackFailure,
+        cleanup,
         'Event callback and listener cleanup both failed',
       )
 
-      if (error !== undefined) throw error
+      if (combined.failed) throw combined.error
     },
     () => {
       // Callback APIs have no error channel for asynchronous cancellation.
@@ -310,10 +333,10 @@ export default function first(
   }) as FirstWaiter
 
   waiter.cancel = (): void => {
-    const cleanupError = registration.cancel()
+    const cleanupResult = registration.cancel()
 
-    if (cleanupError !== undefined) {
-      throw cleanupError
+    if (cleanupResult.failed) {
+      throw cleanupResult.error
     }
   }
 
@@ -335,19 +358,19 @@ export function firstAsync(
       setupFirst(
         stuff,
         options.signal,
-        ({ result, cleanupError }) => {
-          if (cleanupError !== undefined) {
+        ({ result, cleanup }) => {
+          if (cleanup.failed) {
             const primary =
               result.event === 'error' && options.rejectOnError !== false
-                ? result.error ?? new Error('The first event was error')
-                : undefined
+                ? failure(result.error ?? new Error('The first event was error'))
+                : noFailure()
 
             reject(
-              combineErrors(
-                primary ?? undefined,
-                cleanupError,
+              combineFailures(
+                primary,
+                cleanup,
                 'The first event occurred, but listener cleanup failed',
-              ),
+              ).error,
             )
             return
           }
@@ -358,16 +381,14 @@ export function firstAsync(
             resolve(result)
           }
         },
-        (cleanupError) => {
-          const error = abortError(options.signal)
-
-          reject(
-            combineErrors(
-              error,
-              cleanupError,
-              'Aborting the first-event wait also failed to clean up a listener',
-            ),
+        (cleanup) => {
+          const combined = combineFailures(
+            failure(abortError(options.signal)),
+            cleanup,
+            'Aborting the first-event wait also failed to clean up a listener',
           )
+
+          reject(combined.error)
         },
       )
     } catch (error) {
