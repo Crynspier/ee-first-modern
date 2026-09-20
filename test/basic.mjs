@@ -56,3 +56,83 @@ test('registration failure rolls back prior listeners', () => {
   assert.throws(()=>first([[ee,'a'],[bad,'b']],()=>{}),/bad/)
   assert.equal(ee.listenerCount('a'),0)
 })
+
+test('firstAsync rejects when winning-event cleanup throws', async () => {
+  let listener
+  const cleanupError = new Error('cleanup failed')
+  const emitter = {
+    on(_event, fn) { listener = fn },
+    removeListener() { throw cleanupError },
+  }
+
+  const promise = firstAsync([[emitter, 'ready']])
+  listener('value')
+
+  await assert.rejects(promise, error => error === cleanupError)
+})
+
+test('firstAsync combines event and cleanup failures', async () => {
+  let listener
+  const eventError = new Error('event failed')
+  const cleanupError = new Error('cleanup failed')
+  const emitter = {
+    on(_event, fn) { listener = fn },
+    removeListener() { throw cleanupError },
+  }
+
+  const promise = firstAsync([[emitter, 'error']])
+  listener(eventError)
+
+  await assert.rejects(promise, error => {
+    assert.ok(error instanceof AggregateError)
+    assert.deepEqual(error.errors, [eventError, cleanupError])
+    return true
+  })
+})
+
+test('cancel can retry cleanup that previously failed', () => {
+  let attempts = 0
+  const emitter = {
+    on() {},
+    removeListener() {
+      attempts++
+      if (attempts === 1) throw new Error('temporary cleanup failure')
+    },
+  }
+
+  const waiter = first([[emitter, 'ready']], () => {})
+  assert.throws(() => waiter.cancel(), /temporary cleanup failure/)
+  waiter.cancel()
+  assert.equal(attempts, 2)
+})
+
+test('already-aborted callback signal registers no listeners', () => {
+  let registrations = 0
+  const emitter = {
+    on() { registrations++ },
+    removeListener() {},
+  }
+  const controller = new AbortController()
+  controller.abort()
+
+  const waiter = first([[emitter, 'ready']], () => {}, { signal: controller.signal })
+  waiter(() => {})
+  waiter.cancel()
+
+  assert.equal(registrations, 0)
+})
+
+test('callback still runs when cleanup fails, then cleanup error is reported', () => {
+  let listener
+  let called = false
+  const cleanupError = new Error('cleanup failed')
+  const emitter = {
+    on(_event, fn) { listener = fn },
+    removeListener() { throw cleanupError },
+  }
+
+  const waiter = first([[emitter, 'ready']], () => { called = true })
+  assert.throws(() => listener('value'), error => error === cleanupError)
+  assert.equal(called, true)
+  assert.throws(() => waiter.cancel(), error => error === cleanupError)
+})
