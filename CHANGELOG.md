@@ -4,9 +4,9 @@
 
 ### Packaging
 
-- Synced the repository package metadata with the published npm `0.1.4` release.
+- Synced the repository package metadata for the upcoming npm `0.1.4` release.
 - Added npm discovery keywords for the `ee-first`/first-event, event listener, Promise, AbortSignal, JavaScript, and TypeScript use cases.
-- No runtime behavior changes in this release.
+- No runtime behavior changes are intended in this release.
 
 ## 0.1.3 - 2026-09-20
 
