@@ -10,6 +10,7 @@
 - Retained a failed AbortSignal listener removal so a later callback waiter `.cancel()` can retry cleanup.
 - Fixed the cancellation retry guard so a retained AbortSignal cleanup is retried even when all emitter listener removals already succeeded.
 - Distinguished an actual thrown `undefined` failure from the absence of a failure throughout cleanup, callback, and registration error handling without changing the 0.1.3 package version.
+- Fixed the build script on Windows by invoking the local TypeScript compiler through Node instead of attempting to execute the `tsc.cmd` shim directly.
 
 ### Added
 
@@ -21,6 +22,7 @@
 - Coverage for `.removeListener()` taking precedence over `.off()`.
 - Coverage for custom listener `this` values.
 - Public API type checks.
+- Windows CI coverage across Node 18, 20, 22, and 24.
 
 ### Documentation
 
