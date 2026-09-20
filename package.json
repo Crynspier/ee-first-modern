@@ -1,6 +1,6 @@
 {
   "name": "ee-first-modern",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A modern, dependency-free, typed first-event primitive compatible with the ee-first callback API, with Promise and AbortSignal support.",
   "license": "MIT",
   "type": "module",
