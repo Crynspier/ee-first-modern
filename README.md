@@ -151,7 +151,6 @@ The repository includes:
 
 - compatibility and edge-case tests
 - registration rollback and cleanup checks
-- randomized listener-leak testing
 - ESM/CommonJS parity coverage
 - type-level API tests
 - benchmark harness
