@@ -203,6 +203,41 @@ for (const api of apis) {
     assert.equal(removeAttempts, 2)
   })
 
+  test(`${api.name}: emitter and signal cleanup failures are combined`, async () => {
+    let listener
+    const emitterCleanupError = new Error('emitter cleanup failed')
+    const signalCleanupError = new Error('signal cleanup failed')
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener(_event, fn) {
+        this.abortListener = fn
+      },
+      removeEventListener() {
+        throw signalCleanupError
+      },
+      abortListener: undefined,
+    }
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {
+        throw emitterCleanupError
+      },
+    }
+
+    const promise = api.firstAsync([[emitter, 'ready']], { signal })
+    listener('value')
+
+    await assert.rejects(promise, error => {
+      assert.ok(error instanceof AggregateError)
+      assert.equal(error.errors[0], emitterCleanupError)
+      assert.equal(error.errors[1], signalCleanupError)
+      return true
+    })
+  })
+
   test(`${api.name}: abort cleanup failure rejects as AggregateError`, async () => {
     const cleanupError = new Error('signal cleanup failed')
     const signal = {
