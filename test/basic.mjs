@@ -97,6 +97,156 @@ for (const api of apis) {
     assert.deepEqual(result, [null, ee, event, [42]])
   })
 
+
+  test(`${api.name}: off-only emitters are supported`, () => {
+    let listener
+    let offCalls = 0
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      off() {
+        offCalls++
+      },
+    }
+
+    let result
+    api.first([[emitter, 'ready']], (...args) => {
+      result = args
+    })
+
+    listener('value')
+
+    assert.equal(offCalls, 1)
+    assert.deepEqual(result, [null, emitter, 'ready', ['value']])
+  })
+
+  test(`${api.name}: removeListener takes precedence when both cleanup methods exist`, () => {
+    let listener
+    let removeListenerCalls = 0
+    let offCalls = 0
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {
+        removeListenerCalls++
+      },
+      off() {
+        offCalls++
+      },
+    }
+
+    api.first([[emitter, 'ready']], () => {})
+    listener('value')
+
+    assert.equal(removeListenerCalls, 1)
+    assert.equal(offCalls, 0)
+  })
+
+  test(`${api.name}: custom listener this is reported as the winning emitter context`, () => {
+    let listener
+    const context = {}
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {},
+    }
+
+    let result
+    api.first([[emitter, 'ready']], (...args) => {
+      result = args
+    })
+
+    listener.call(context, 'value')
+
+    assert.equal(result[1], context)
+  })
+
+  test(`${api.name}: signal cleanup failure is surfaced and retryable for callback API`, () => {
+    let listener
+    let removeAttempts = 0
+    const cleanupError = new Error('signal cleanup failed')
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener(_event, fn) {
+        this.abortListener = fn
+      },
+      removeEventListener() {
+        removeAttempts++
+        if (removeAttempts === 1) throw cleanupError
+      },
+      abortListener: undefined,
+    }
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {},
+    }
+
+    let called = false
+    const waiter = api.first(
+      [[emitter, 'ready']],
+      () => {
+        called = true
+      },
+      { signal },
+    )
+
+    assert.throws(() => listener('value'), error => error === cleanupError)
+    assert.equal(called, true)
+
+    waiter.cancel()
+    assert.equal(removeAttempts, 2)
+  })
+
+  test(`${api.name}: abort cleanup failure rejects as AggregateError`, async () => {
+    const cleanupError = new Error('signal cleanup failed')
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener(_event, fn) {
+        this.abortListener = fn
+      },
+      removeEventListener() {
+        throw cleanupError
+      },
+      abortListener: undefined,
+    }
+    const emitter = {
+      on() {},
+      removeListener() {},
+    }
+
+    const promise = api.firstAsync([[emitter, 'ready']], { signal })
+    signal.reason = 'cancelled'
+    signal.aborted = true
+    signal.abortListener()
+
+    await assert.rejects(promise, error => {
+      assert.ok(error instanceof AggregateError)
+      assert.ok(error.errors[0] instanceof api.FirstAbortedError)
+      assert.equal(error.errors[1], cleanupError)
+      return true
+    })
+  })
+
+  test(`${api.name}: error event without an argument exposes undefined`, () => {
+    const ee = new EventEmitter()
+    let error
+
+    api.first([[ee, 'error']], value => {
+      error = value
+    })
+
+    ee.emit('error')
+
+    assert.equal(error, undefined)
+  })
+
   test(`${api.name}: cancel cleans listeners`, () => {
     const ee = new EventEmitter()
     let called = false
