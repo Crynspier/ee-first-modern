@@ -154,7 +154,7 @@ The repository includes:
 - ESM/CommonJS parity coverage
 - type-level API tests
 - benchmark harness
-- Node 18/20/22/24 CI
+- Node 18/20/22/24/26 CI across Linux, Windows, and macOS (ARM64 primary; Intel smoke test)
 - public API type checks
 - zero runtime dependencies
 
