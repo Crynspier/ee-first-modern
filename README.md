@@ -43,6 +43,12 @@ The original `ee-first` package is a long-established dependency. This project i
 
 The compatibility target is the public callback behavior and callable waiter shape. The modern APIs are additive.
 
+## Build architecture
+
+`src/index.ts` is the single source of truth. The build generates both ESM and CommonJS artifacts from that same TypeScript implementation. The CommonJS entrypoint is a generated compatibility shim that preserves the historical callable `require('ee-first-modern')` shape.
+
+The test suite loads both `dist/index.js` and `dist/index.cjs` and runs the same behavior suite against each format, so packaging drift between ESM and CommonJS is caught by CI.
+
 ## Install
 
 ```sh
@@ -138,7 +144,7 @@ The repository includes:
 - compatibility and edge-case tests
 - registration rollback and cleanup checks
 - randomized listener-leak testing
-- ESM/CommonJS coverage
+- ESM/CommonJS parity coverage
 - type-level API tests
 - benchmark harness
 - Node 18/20/22/24 CI
