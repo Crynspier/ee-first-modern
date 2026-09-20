@@ -9,14 +9,14 @@ export interface EventEmitterLike {
 export type EventSpec = readonly [EventEmitterLike, ...EventName[]]
 
 export type FirstCallback = (
-  error: unknown | null,
+  error: unknown | null | undefined,
   emitter: EventEmitterLike,
   event: EventName,
   args: unknown[],
 ) => void
 
 export interface FirstResult {
-  error: unknown | null
+  error: unknown | null | undefined
   emitter: EventEmitterLike
   event: EventName
   args: unknown[]
@@ -164,13 +164,23 @@ function setupFirst(
 
   const cleanup = (): CleanupError => {
     const cleanupError = cleanupEntries(cleanups)
+    let abortCleanupError: CleanupError
 
     if (abortHandler && signal) {
-      signal.removeEventListener('abort', abortHandler)
-      abortHandler = undefined
+      try {
+        signal.removeEventListener('abort', abortHandler)
+        abortHandler = undefined
+      } catch (error) {
+        // Keep the handler reference so a later cancel() can retry removal.
+        abortCleanupError = error
+      }
     }
 
-    return cleanupError
+    return combineErrors(
+      cleanupError,
+      abortCleanupError,
+      'Event listener and AbortSignal cleanup both failed',
+    )
   }
 
   const complete = (
