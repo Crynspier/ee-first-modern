@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.3 - 2026-09-20
+
+### Fixed
+
+- Corrected callback and Promise result typing so `error` may be `undefined` for an `'error'` event emitted without arguments, matching runtime compatibility behavior.
+- Hardened cleanup of the internal `AbortSignal` listener when a non-standard signal throws from `removeEventListener()`.
+- Combined event-listener and AbortSignal cleanup failures with `AggregateError` when both fail.
+- Retained a failed AbortSignal listener removal so a later callback waiter `.cancel()` can retry cleanup.
+
+### Added
+
+- Regression coverage for signal cleanup failures and retry behavior.
+- Regression coverage for abort cleanup failures producing `AggregateError`.
+- Coverage for emitters that expose only `.off()`.
+- Coverage for `.removeListener()` taking precedence over `.off()`.
+- Coverage for custom listener `this` values.
+- Public API type checks.
+
+### Documentation
+
+- Documented the `undefined` error value for argument-less `'error'` events.
+- Documented synchronous custom-emitter registration behavior.
+- Documented cleanup precedence between `.removeListener()` and `.off()`.
+
 ## 0.1.2 - 2026-09-20
 
 ### Fixed
