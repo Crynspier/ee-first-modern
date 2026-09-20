@@ -1,4 +1,5 @@
 node_modules/
 dist/
+.build-cjs/
 *.log
 .DS_Store
