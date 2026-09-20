@@ -1,13 +1,18 @@
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 
-const tsc = process.platform === 'win32' ? 'tsc.cmd' : 'tsc'
+const tsc = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url))
 
 rmSync('dist', { recursive: true, force: true })
 rmSync('.build-cjs', { recursive: true, force: true })
 
-execFileSync(tsc, ['-p', 'tsconfig.json'], { stdio: 'inherit' })
-execFileSync(tsc, ['-p', 'tsconfig.cjs.json'], { stdio: 'inherit' })
+const runTsc = (project) => {
+  execFileSync(process.execPath, [tsc, '-p', project], { stdio: 'inherit' })
+}
+
+runTsc('tsconfig.json')
+runTsc('tsconfig.cjs.json')
 
 mkdirSync('dist', { recursive: true })
 renameSync('.build-cjs/index.js', 'dist/index-core.cjs')
