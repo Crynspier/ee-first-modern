@@ -58,7 +58,7 @@ const waiter = first([
   [request, 'close', 'error'],
   [response, 'finish'],
 ], (error, emitter, event, args) => {
-  // All registered listeners have already been removed.
+  // Cleanup has been attempted before this callback runs.
 })
 
 waiter.cancel()
@@ -111,6 +111,16 @@ controller.abort('request cancelled')
 Aborting removes the registered listeners and rejects with `FirstAbortedError`. A non-`undefined` abort reason is available as `error.cause`.
 
 The callback API also accepts `{ signal }`; aborting cancels the waiter without invoking the callback.
+
+## Cleanup and failure semantics
+
+Cleanup is attempted before the callback or Promise settles.
+
+For the callback API, the callback still runs if listener cleanup fails; the cleanup error is then thrown synchronously. Calling `.cancel()` again retries any listener removals that previously failed.
+
+For the Promise API, a cleanup failure rejects the Promise. When both the winning `error` event and cleanup fail, the rejection is an `AggregateError` containing both failures. Aborting rejects with `FirstAbortedError`; a simultaneous cleanup failure is combined with it in an `AggregateError`.
+
+An already-aborted signal is checked before event listeners are registered.
 
 ## Supported emitter shape
 
