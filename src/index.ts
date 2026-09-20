@@ -16,7 +16,7 @@ export type FirstCallback = (
 ) => void
 
 export interface FirstResult {
-  error: unknown
+  error: unknown | null
   emitter: EventEmitterLike
   event: EventName
   args: unknown[]
@@ -42,6 +42,23 @@ export class FirstAbortedError extends Error {
   constructor(message = 'The first-event wait was aborted') {
     super(message)
   }
+}
+
+type CleanupEntry = {
+  emitter: EventEmitterLike
+  event: EventName
+  listener: (...args: unknown[]) => void
+}
+
+type CleanupError = unknown | undefined
+
+interface Registration {
+  cancel(): CleanupError
+}
+
+interface Completion {
+  result: FirstResult
+  cleanupError: CleanupError
 }
 
 function validateSpecs(stuff: readonly EventSpec[]): void {
@@ -84,24 +101,31 @@ function removeListener(
   throw new TypeError('event emitter must expose .removeListener() or .off() for cleanup')
 }
 
-function cleanupEntries(
-  entries: Array<{
-    emitter: EventEmitterLike
-    event: EventName
-    listener: (...args: unknown[]) => void
-  }>,
-): unknown | undefined {
+/**
+ * Attempts every removal. Entries whose remover throws remain registered so a
+ * later cancel() can retry cleanup. The first failure is returned.
+ */
+function cleanupEntries(entries: CleanupEntry[]): CleanupError {
   let firstError: unknown | undefined
+  const remaining: CleanupEntry[] = []
 
-  for (const entry of entries.splice(0)) {
+  for (const entry of entries) {
     try {
       removeListener(entry.emitter, entry.event, entry.listener)
     } catch (error) {
+      remaining.push(entry)
       if (firstError === undefined) firstError = error
     }
   }
 
+  entries.splice(0, entries.length, ...remaining)
   return firstError
+}
+
+function combineErrors(primary: unknown, secondary: unknown, message: string): unknown {
+  if (secondary === undefined) return primary
+  if (primary === undefined) return secondary
+  return new AggregateError([primary, secondary], message)
 }
 
 function abortError(signal?: AbortSignal): FirstAbortedError {
@@ -120,35 +144,33 @@ function abortError(signal?: AbortSignal): FirstAbortedError {
   return error
 }
 
-export default function first(
+function cancelledWaiter(): FirstWaiter {
+  const waiter = ((_nextDone: FirstCallback): void => {}) as FirstWaiter
+  waiter.cancel = () => {}
+  return waiter
+}
+
+function setupFirst(
   stuff: readonly EventSpec[],
-  done: FirstCallback,
-  options: FirstOptions = {},
-): FirstWaiter {
+  signal: AbortSignal | undefined,
+  onEvent: (completion: Completion) => void,
+  onAbort: (cleanupError: CleanupError) => void,
+): Registration {
   validateSpecs(stuff)
 
-  if (typeof done !== 'function') {
-    throw new TypeError('listener must be a function')
-  }
-
-  const cleanups: Array<{
-    emitter: EventEmitterLike
-    event: EventName
-    listener: (...args: unknown[]) => void
-  }> = []
-
+  const cleanups: CleanupEntry[] = []
   let settled = false
   let abortHandler: (() => void) | undefined
 
-  const cleanup = (): void => {
+  const cleanup = (): CleanupError => {
     const cleanupError = cleanupEntries(cleanups)
 
-    if (abortHandler && options.signal) {
-      options.signal.removeEventListener('abort', abortHandler)
+    if (abortHandler && signal) {
+      signal.removeEventListener('abort', abortHandler)
       abortHandler = undefined
     }
 
-    if (cleanupError !== undefined) throw cleanupError
+    return cleanupError
   }
 
   const complete = (
@@ -160,8 +182,12 @@ export default function first(
     if (settled) return
 
     settled = true
-    cleanup()
-    done(error, emitter, event, args)
+    const cleanupError = cleanup()
+
+    onEvent({
+      result: { error, emitter, event, args },
+      cleanupError,
+    })
   }
 
   const addListener = (emitter: EventEmitterLike, event: EventName): void => {
@@ -172,67 +198,113 @@ export default function first(
       complete(error, this ?? emitter, event, args.slice())
     }
 
+    // Register cleanup before calling user/custom emitter code. This prevents
+    // synchronous emitters from winning before their own listener is tracked.
     cleanups.push({ emitter, event, listener })
     emitter.on(event, listener)
+  }
+
+  if (signal?.aborted) {
+    settled = true
+    return {
+      cancel: () => undefined,
+    }
+  }
+
+  if (signal) {
+    abortHandler = () => {
+      if (settled) return
+
+      settled = true
+      const cleanupError = cleanup()
+      onAbort(cleanupError)
+    }
+
+    signal.addEventListener('abort', abortHandler, { once: true })
   }
 
   try {
     for (const spec of stuff) {
       const [emitter, ...events] = spec
-      for (const event of events) addListener(emitter, event)
+
+      for (const event of events) {
+        addListener(emitter, event)
+      }
     }
   } catch (error) {
-    try {
-      cleanup()
-    } catch {
-      // Preserve the original registration error.
-    }
-    throw error
+    const cleanupError = cleanup()
+    throw combineErrors(error, cleanupError, 'Event listener registration and cleanup both failed')
   }
 
-  if (options.signal) {
-    if (options.signal.aborted) {
-      settled = true
-
-      try {
-        cleanup()
-      } catch {
-        // Callback-style abort is best-effort cleanup.
-      }
-
-      const cancelled = ((_: FirstCallback) => {}) as FirstWaiter
-      cancelled.cancel = () => {}
-      return cancelled
-    }
-
-    abortHandler = () => {
-      if (settled) return
+  return {
+    cancel: (): CleanupError => {
+      // If an earlier cleanup failed, allow a later cancel() to retry the
+      // remaining removals even though the waiter has logically settled.
+      if (cleanups.length === 0 && settled) return undefined
 
       settled = true
-
-      try {
-        cleanup()
-      } catch {
-        // Callback-style abort is best-effort cleanup.
-      }
-    }
-
-    options.signal.addEventListener('abort', abortHandler, { once: true })
+      return cleanup()
+    },
   }
+}
+
+export default function first(
+  stuff: readonly EventSpec[],
+  done: FirstCallback,
+  options: FirstOptions = {},
+): FirstWaiter {
+  if (typeof done !== 'function') {
+    throw new TypeError('listener must be a function')
+  }
+
+  if (options.signal?.aborted) {
+    validateSpecs(stuff)
+    return cancelledWaiter()
+  }
+
+  let callback = done
+
+  let registration!: Registration
+  registration = setupFirst(
+    stuff,
+    options.signal,
+    ({ result, cleanupError }) => {
+      let callbackError: unknown | undefined
+
+      try {
+        callback(result.error, result.emitter, result.event, result.args)
+      } catch (error) {
+        callbackError = error
+      }
+
+      const error = combineErrors(
+        callbackError,
+        cleanupError,
+        'Event callback and listener cleanup both failed',
+      )
+
+      if (error !== undefined) throw error
+    },
+    () => {
+      // Callback APIs have no error channel for asynchronous cancellation.
+      // Cancellation is therefore intentionally silent.
+    },
+  )
 
   const waiter = ((nextDone: FirstCallback): void => {
     if (typeof nextDone !== 'function') {
       throw new TypeError('listener must be a function')
     }
 
-    done = nextDone
+    callback = nextDone
   }) as FirstWaiter
 
   waiter.cancel = (): void => {
-    if (settled) return
+    const cleanupError = registration.cancel()
 
-    settled = true
-    cleanup()
+    if (cleanupError !== undefined) {
+      throw cleanupError
+    }
   }
 
   return waiter
@@ -243,59 +315,53 @@ export function firstAsync(
   options: FirstPromiseOptions = {},
 ): Promise<FirstResult> {
   return new Promise<FirstResult>((resolve, reject) => {
-    let waiter: FirstWaiter | undefined
-    let abortListener: (() => void) | undefined
-    let settled = false
-
-    const removeAbortListener = (): void => {
-      if (abortListener && options.signal) {
-        options.signal.removeEventListener('abort', abortListener)
-        abortListener = undefined
-      }
-    }
-
-    const settleAbort = (): void => {
-      if (settled) return
-
-      settled = true
-      waiter?.cancel()
-      removeAbortListener()
-      reject(abortError(options.signal))
-    }
-
     if (options.signal?.aborted) {
-      settleAbort()
+      validateSpecs(stuff)
+      reject(abortError(options.signal))
       return
-    }
-
-    const onFirst: FirstCallback = (error, emitter, event, args) => {
-      if (settled) return
-
-      settled = true
-      removeAbortListener()
-
-      const result: FirstResult = { error, emitter, event, args }
-
-      if (event === 'error' && options.rejectOnError !== false) {
-        reject(error ?? new Error('The first event was error'))
-      } else {
-        resolve(result)
-      }
     }
 
     try {
-      waiter = first(stuff, onFirst)
+      setupFirst(
+        stuff,
+        options.signal,
+        ({ result, cleanupError }) => {
+          if (cleanupError !== undefined) {
+            const primary =
+              result.event === 'error' && options.rejectOnError !== false
+                ? result.error ?? new Error('The first event was error')
+                : undefined
+
+            reject(
+              combineErrors(
+                primary ?? undefined,
+                cleanupError,
+                'The first event occurred, but listener cleanup failed',
+              ),
+            )
+            return
+          }
+
+          if (result.event === 'error' && options.rejectOnError !== false) {
+            reject(result.error ?? new Error('The first event was error'))
+          } else {
+            resolve(result)
+          }
+        },
+        (cleanupError) => {
+          const error = abortError(options.signal)
+
+          reject(
+            combineErrors(
+              error,
+              cleanupError,
+              'Aborting the first-event wait also failed to clean up a listener',
+            ),
+          )
+        },
+      )
     } catch (error) {
-      settled = true
       reject(error)
-      return
-    }
-
-    if (options.signal) {
-      abortListener = settleAbort
-      options.signal.addEventListener('abort', abortListener, { once: true })
-
-      if (settled) removeAbortListener()
     }
   })
 }
