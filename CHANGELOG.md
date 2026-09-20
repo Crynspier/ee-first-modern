@@ -11,7 +11,7 @@
 - Fixed the cancellation retry guard so a retained AbortSignal cleanup is retried even when all emitter listener removals already succeeded.
 - Distinguished an actual thrown `undefined` failure from the absence of a failure throughout cleanup, callback, and registration error handling without changing the 0.1.3 package version.
 - Fixed the build script on Windows by invoking the local TypeScript compiler through Node instead of attempting to execute the `tsc.cmd` shim directly.
-- Fixed the test script on Windows by passing the `test` directory to Node's test runner instead of relying on shell glob expansion.
+- Fixed the test script across platforms by invoking the test file explicitly instead of relying on shell glob or directory expansion.
 
 ### Added
 
