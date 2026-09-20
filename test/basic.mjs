@@ -269,6 +269,142 @@ for (const api of apis) {
     })
   })
 
+  test(`${api.name}: cleanup failure preserves thrown undefined`, () => {
+    let listener
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {
+        throw undefined
+      },
+    }
+
+    const waiter = api.first([[emitter, 'ready']], () => {})
+
+    let thrown = Symbol('not-thrown')
+    try {
+      listener('value')
+    } catch (error) {
+      thrown = error
+    }
+
+    assert.equal(thrown, undefined)
+    assert.throws(() => waiter.cancel(), error => error === undefined)
+  })
+
+  test(`${api.name}: callback failure preserves thrown undefined`, () => {
+    let listener
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {},
+    }
+
+    api.first([[emitter, 'ready']], () => {
+      throw undefined
+    })
+
+    let thrown = Symbol('not-thrown')
+    try {
+      listener('value')
+    } catch (error) {
+      thrown = error
+    }
+
+    assert.equal(thrown, undefined)
+  })
+
+  test(`${api.name}: Promise cleanup failure rejects with thrown undefined`, async () => {
+    let listener
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {
+        throw undefined
+      },
+    }
+
+    const promise = api.firstAsync([[emitter, 'ready']])
+    listener('value')
+
+    await assert.rejects(promise, error => error === undefined)
+  })
+
+  test(`${api.name}: callback and cleanup thrown undefined become AggregateError`, () => {
+    let listener
+    const emitter = {
+      on(_event, fn) {
+        listener = fn
+      },
+      removeListener() {
+        throw undefined
+      },
+    }
+
+    api.first([[emitter, 'ready']], () => {
+      throw undefined
+    })
+
+    let thrown
+    try {
+      listener('value')
+    } catch (error) {
+      thrown = error
+    }
+
+    assert.ok(thrown instanceof AggregateError)
+    assert.deepEqual(thrown.errors, [undefined, undefined])
+  })
+
+  test(`${api.name}: registration failure preserves thrown undefined`, () => {
+    const emitter = {
+      on() {
+        throw undefined
+      },
+      removeListener() {},
+    }
+
+    let thrown = Symbol('not-thrown')
+    try {
+      api.first([[emitter, 'ready']], () => {})
+    } catch (error) {
+      thrown = error
+    }
+
+    assert.equal(thrown, undefined)
+  })
+
+  test(`${api.name}: registration and cleanup thrown undefined become AggregateError`, () => {
+    const cleanupEmitter = {
+      on() {},
+      removeListener() {
+        throw undefined
+      },
+    }
+    const registrationEmitter = {
+      on() {
+        throw undefined
+      },
+      removeListener() {},
+    }
+
+    let thrown
+    try {
+      api.first(
+        [[cleanupEmitter, 'ready'], [registrationEmitter, 'finish']],
+        () => {},
+      )
+    } catch (error) {
+      thrown = error
+    }
+
+    assert.ok(thrown instanceof AggregateError)
+    assert.deepEqual(thrown.errors, [undefined, undefined])
+  })
+
   test(`${api.name}: error event without an argument exposes undefined`, () => {
     const ee = new EventEmitter()
     let error
