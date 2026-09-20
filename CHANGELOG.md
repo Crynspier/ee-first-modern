@@ -1,12 +1,22 @@
 # Changelog
 
+## 0.1.5 - 2026-09-20
+
+### Build and packaging
+
+- Added macOS ARM64 CI coverage across Node 18, 20, 22, 24, and 26.
+- Added a macOS Intel smoke-test job on Node 26.
+- Standardized CI coverage across Linux, Windows, macOS ARM64, and macOS Intel.
+- Promoted the package metadata/keyword update into this release.
+- No runtime behavior changes.
+
 ## 0.1.4 - 2026-09-20
 
 ### Packaging
 
-- Synced the repository package metadata for the upcoming npm `0.1.4` release.
+- Synced the repository package metadata for the npm `0.1.4` release preparation.
 - Added npm discovery keywords for the `ee-first`/first-event, event listener, Promise, AbortSignal, JavaScript, and TypeScript use cases.
-- No runtime behavior changes are intended in this release.
+- No runtime behavior changes were made in this metadata update.
 
 ## 0.1.3 - 2026-09-20
 
