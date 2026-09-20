@@ -250,7 +250,7 @@ function setupFirst(
     cancel: (): CleanupError => {
       // If an earlier cleanup failed, allow a later cancel() to retry the
       // remaining removals even though the waiter has logically settled.
-      if (cleanups.length === 0 && settled) return undefined
+      if (cleanups.length === 0 && !abortHandler && settled) return undefined
 
       settled = true
       return cleanup()
