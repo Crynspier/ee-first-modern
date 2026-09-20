@@ -8,10 +8,12 @@
 - Hardened cleanup of the internal `AbortSignal` listener when a non-standard signal throws from `removeEventListener()`.
 - Combined event-listener and AbortSignal cleanup failures with `AggregateError` when both fail.
 - Retained a failed AbortSignal listener removal so a later callback waiter `.cancel()` can retry cleanup.
+- Fixed the cancellation retry guard so a retained AbortSignal cleanup is retried even when all emitter listener removals already succeeded.
 
 ### Added
 
 - Regression coverage for signal cleanup failures and retry behavior.
+- Regression coverage for simultaneous emitter and AbortSignal cleanup failures.
 - Regression coverage for abort cleanup failures producing `AggregateError`.
 - Coverage for emitters that expose only `.off()`.
 - Coverage for `.removeListener()` taking precedence over `.off()`.
