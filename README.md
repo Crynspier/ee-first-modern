@@ -126,7 +126,15 @@ For the callback API, the callback still runs if listener cleanup fails; the cle
 
 For the Promise API, a cleanup failure rejects the Promise. When both the winning `error` event and cleanup fail, the rejection is an `AggregateError` containing both failures. Aborting rejects with `FirstAbortedError`; a simultaneous cleanup failure is combined with it in an `AggregateError`.
 
-An already-aborted signal is checked before event listeners are registered.
+Cleanup includes the package's internal `AbortSignal` listener. If a non-standard signal throws while removing that listener, the failure is surfaced alongside any event-listener cleanup failure, and the callback waiter's later `.cancel()` can retry it.
+
+An `'error'` event with no arguments preserves the historical callback behavior: `error` is `undefined`. The public callback and result types therefore allow `unknown | null | undefined`.
+
+## Behavior notes
+
+Event listeners may be invoked synchronously by a custom emitter during `.on()`. In that case the winning callback can run before `first()` returns, so the returned waiter is not available from inside that callback yet.
+
+When an emitter provides both `.removeListener()` and `.off()`, cleanup uses `.removeListener()` first and `.off()` as the fallback.
 
 ## Supported emitter shape
 
@@ -148,6 +156,7 @@ The repository includes:
 - type-level API tests
 - benchmark harness
 - Node 18/20/22/24 CI
+- public API type checks
 - zero runtime dependencies
 
 Run locally:
